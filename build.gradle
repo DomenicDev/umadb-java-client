@@ -1,0 +1,55 @@
+plugins {
+    id 'java'
+    id 'com.google.protobuf' version '0.9.5'
+}
+
+group = 'io.umadb'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'io.grpc:grpc-netty-shaded:1.77.0'
+    implementation 'io.grpc:grpc-protobuf:1.77.0'
+    implementation 'io.grpc:grpc-stub:1.77.0'
+
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+protobuf {
+    protoc {
+        // This pulls the Protobuf compiler version from Maven Central
+        artifact = "com.google.protobuf:protoc:3.25.8"
+    }
+    plugins {
+        grpc {
+            // The gRPC Java code generator
+            artifact = "io.grpc:protoc-gen-grpc-java:1.77.0"
+        }
+    }
+    generateProtoTasks {
+        all().each { task ->
+            task.plugins {
+                grpc {}
+            }
+        }
+    }
+}
+
+// Make sure generated sources are added to compilation
+//sourceSets {
+//    main {
+//        java {
+//            srcDirs += "build/generated/source/proto/main/java"
+//            srcDirs += "build/generated/source/proto/main/grpc"
+//        }
+//    }
+//}
