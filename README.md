@@ -18,8 +18,8 @@ TODO: Add code examples
 
 ### TODO
 
-[ ] Async client
-[ ] Proper exception handling
-[ ] Integration tests with Testcontainers
-[ ] Automation with GitHub actions
-[ ] Publish artifacts on maven central
+- Async client
+- Proper exception handling
+- Integration tests with Testcontainers
+- Automation with GitHub actions
+- Publish artifacts on maven central
