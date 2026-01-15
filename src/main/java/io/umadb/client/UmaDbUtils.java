@@ -40,10 +40,13 @@ public final class UmaDbUtils {
 
     public static Umadb.AppendCondition toUmadbAppendCondition(AppendCondition appendCondition) {
         var umaDbQuery = toUmadbQuery(appendCondition.failIfEventsMatch());
-        return Umadb.AppendCondition.newBuilder()
-                .setFailIfEventsMatch(umaDbQuery)
-                .setAfter(appendCondition.after())
-                .build();
+        var builder = Umadb.AppendCondition.newBuilder()
+                .setFailIfEventsMatch(umaDbQuery);
+
+        if (appendCondition.after() != null) {
+            builder.setAfter(appendCondition.after());
+        }
+        return builder.build();
     }
 
     public static Umadb.Query toUmadbQuery(Query query) {

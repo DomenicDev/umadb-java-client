@@ -43,13 +43,3 @@ protobuf {
         }
     }
 }
-
-// Make sure generated sources are added to compilation
-//sourceSets {
-//    main {
-//        java {
-//            srcDirs += "build/generated/source/proto/main/java"
-//            srcDirs += "build/generated/source/proto/main/grpc"
-//        }
-//    }
-//}

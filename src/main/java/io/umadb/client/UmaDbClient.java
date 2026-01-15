@@ -2,6 +2,7 @@ package io.umadb.client;
 
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.StatusRuntimeException;
 import umadb.v1.DCBGrpc;
 import umadb.v1.Umadb;
 
@@ -26,8 +27,20 @@ public class UmaDbClient {
 
     public AppendResponse handle(AppendRequest appendRequest) {
         var umadbAppendRequest = UmaDbUtils.toUmadbAppendRequest(appendRequest);
-        var umadbAppendResponse = blockingStub.append(umadbAppendRequest);
-        return new AppendResponse(umadbAppendResponse.getPosition());
+        try {
+            var umadbAppendResponse = blockingStub.append(umadbAppendRequest);
+            return new AppendResponse(umadbAppendResponse.getPosition());
+        } catch (StatusRuntimeException e) {
+            var description = e.getStatus().getDescription();
+            switch (e.getStatus().getCode()) {
+                case FAILED_PRECONDITION -> throw new UmaDbException.IntegrityException(description);
+                case INTERNAL -> throw new UmaDbException.InternalException(description);
+                case UNAUTHENTICATED -> throw new UmaDbException.AuthenticationException();
+                default -> throw new UmaDbException(e);
+
+            }
+        }
+
     }
 
     public Iterator<ReadResponse> handle(ReadRequest readRequest) {
