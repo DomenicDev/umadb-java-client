@@ -1,12 +1,16 @@
 package io.umadb.client;
 
+import com.google.protobuf.Any;
+import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.StatusRuntimeException;
+import io.grpc.protobuf.StatusProto;
 import umadb.v1.DCBGrpc;
 import umadb.v1.Umadb;
 
 import java.util.Iterator;
+import java.util.Optional;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 
@@ -25,22 +29,60 @@ public class UmaDbClient {
         this.blockingStub = DCBGrpc.newBlockingStub(channel);
     }
 
-    public AppendResponse handle(AppendRequest appendRequest) {
+    public final AppendResponse handle(AppendRequest appendRequest) {
         var umadbAppendRequest = UmaDbUtils.toUmadbAppendRequest(appendRequest);
         try {
             var umadbAppendResponse = blockingStub.append(umadbAppendRequest);
             return new AppendResponse(umadbAppendResponse.getPosition());
         } catch (StatusRuntimeException e) {
-            var description = e.getStatus().getDescription();
-            switch (e.getStatus().getCode()) {
-                case FAILED_PRECONDITION -> throw new UmaDbException.IntegrityException(description);
-                case INTERNAL -> throw new UmaDbException.InternalException(description);
-                case UNAUTHENTICATED -> throw new UmaDbException.AuthenticationException();
-                default -> throw new UmaDbException(e);
+            throw extractErrorResponse(e)
+                    .map(this::toUmaDbException)
+                    .orElseGet(() -> toUmaDbException(e));
+        }
+    }
 
+
+    private UmaDbException toUmaDbException(Umadb.ErrorResponse errorResponse) {
+        var errorMessage = errorResponse.getMessage();
+        return switch (errorResponse.getErrorType()) {
+            case IO -> new UmaDbException.IoException(errorMessage);
+            case SERIALIZATION -> new UmaDbException.SerializationException(errorMessage);
+            case INTEGRITY -> new UmaDbException.IntegrityException(errorMessage);
+            case CORRUPTION -> new UmaDbException.CorruptionException(errorMessage);
+            case INTERNAL -> new UmaDbException.InternalException(errorMessage);
+            case AUTHENTICATION -> new UmaDbException.AuthenticationException(errorMessage);
+            case UNRECOGNIZED -> new UmaDbException(errorMessage);
+        };
+    }
+
+    private UmaDbException toUmaDbException(StatusRuntimeException e) {
+        var errorMessage = e.getMessage();
+        return switch (e.getStatus().getCode()) {
+            case UNAUTHENTICATED -> new UmaDbException.AuthenticationException(errorMessage);
+            case FAILED_PRECONDITION -> new UmaDbException.IntegrityException(errorMessage);
+            case DATA_LOSS -> new UmaDbException.CorruptionException(errorMessage);
+            case INVALID_ARGUMENT -> new UmaDbException.SerializationException(errorMessage);
+            case INTERNAL -> new UmaDbException.InternalException(errorMessage);
+            default -> new UmaDbException("gRPC error: %s".formatted(errorMessage), e);
+        };
+    }
+
+    private Optional<Umadb.ErrorResponse> extractErrorResponse(StatusRuntimeException e) {
+        var statusProto = StatusProto.fromStatusAndTrailers(e.getStatus(), e.getTrailers());
+
+        if (statusProto == null) {
+            return Optional.empty();
+        }
+        for (Any detail : statusProto.getDetailsList()) {
+            if (detail.is(Umadb.ErrorResponse.class)) {
+                try {
+                    return Optional.of(detail.unpack(Umadb.ErrorResponse.class));
+                } catch (InvalidProtocolBufferException ex) {
+                    // malformed detail, we skip
+                }
             }
         }
-
+        return Optional.empty();
     }
 
     public Iterator<ReadResponse> handle(ReadRequest readRequest) {
