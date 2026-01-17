@@ -1,11 +1,7 @@
 package io.umadb.client;
 
-import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
-import io.grpc.StatusRuntimeException;
-import io.grpc.protobuf.StatusProto;
+import io.grpc.*;
 import umadb.v1.DCBGrpc;
 import umadb.v1.Umadb;
 
@@ -15,6 +11,11 @@ import java.util.Optional;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class UmaDbClient {
+
+    private static final Metadata.Key<byte[]> DETAILS = Metadata.Key.of(
+            "grpc-status-details-bin",
+            Metadata.BINARY_BYTE_MARSHALLER
+    );
 
     private static final int TIMEOUT_TERMINATION_SECONDS = 5;
 
@@ -68,21 +69,16 @@ public class UmaDbClient {
     }
 
     private Optional<Umadb.ErrorResponse> extractErrorResponse(StatusRuntimeException e) {
-        var statusProto = StatusProto.fromStatusAndTrailers(e.getStatus(), e.getTrailers());
+        return Optional.ofNullable(e.getTrailers())
+                .flatMap(UmaDbClient::extractErrorResponseFromMetadata);
+    }
 
-        if (statusProto == null) {
+    private static Optional<Umadb.ErrorResponse> extractErrorResponseFromMetadata(Metadata trailers) {
+        try {
+            return Optional.of(Umadb.ErrorResponse.parseFrom(trailers.get(DETAILS)));
+        } catch (InvalidProtocolBufferException ex) {
             return Optional.empty();
         }
-        for (Any detail : statusProto.getDetailsList()) {
-            if (detail.is(Umadb.ErrorResponse.class)) {
-                try {
-                    return Optional.of(detail.unpack(Umadb.ErrorResponse.class));
-                } catch (InvalidProtocolBufferException ex) {
-                    // malformed detail, we skip
-                }
-            }
-        }
-        return Optional.empty();
     }
 
     public Iterator<ReadResponse> handle(ReadRequest readRequest) {
