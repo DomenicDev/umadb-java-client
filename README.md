@@ -19,8 +19,6 @@ TODO: Add code examples
 ### TODO
 
 - Async client
-- Integration tests with Testcontainers
 - JavaDoc
 - Non-null validation for fields in records
-- Automation with GitHub actions
 - Publish artifacts on maven central
