@@ -3,6 +3,8 @@ package io.umadb.client;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
 import java.util.UUID;
@@ -10,13 +12,20 @@ import java.util.UUID;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.*;
 
-public class UmaDbClientTest {
+@Testcontainers
+class UmaDbClientTest {
+
+    @Container
+    private static final UmaDbContainer UMA_DB_CONTAINER = new UmaDbContainer();
 
     UmaDbClient client;
 
     @BeforeEach
     void setUp() {
-        this.client = new UmaDbClient("localhost", 50051);
+        this.client = new UmaDbClient(
+                UMA_DB_CONTAINER.getHost(),
+                UMA_DB_CONTAINER.getExposedGrpcPort()
+        );
     }
 
     @Test
