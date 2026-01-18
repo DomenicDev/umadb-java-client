@@ -11,9 +11,9 @@ repositories {
 }
 
 dependencies {
-    implementation 'io.grpc:grpc-netty-shaded:1.77.0'
-    implementation 'io.grpc:grpc-protobuf:1.77.0'
-    implementation 'io.grpc:grpc-stub:1.77.0'
+    implementation 'io.grpc:grpc-netty-shaded:1.78.0'
+    implementation 'io.grpc:grpc-protobuf:1.78.0'
+    implementation 'io.grpc:grpc-stub:1.78.0'
 
     testImplementation platform('org.junit:junit-bom:6.0.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -33,7 +33,7 @@ protobuf {
     plugins {
         grpc {
             // The gRPC Java code generator
-            artifact = "io.grpc:protoc-gen-grpc-java:1.77.0"
+            artifact = "io.grpc:protoc-gen-grpc-java:1.78.0"
         }
     }
     generateProtoTasks {
