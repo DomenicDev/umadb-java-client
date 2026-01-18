@@ -2,7 +2,6 @@ package io.umadb.client;
 
 import umadb.v1.Umadb;
 
-import java.util.Iterator;
 import java.util.UUID;
 
 import static com.google.protobuf.ByteString.copyFrom;

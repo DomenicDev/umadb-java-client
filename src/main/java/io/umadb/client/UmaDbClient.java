@@ -1,108 +1,71 @@
 package io.umadb.client;
 
-import com.google.protobuf.InvalidProtocolBufferException;
-import io.grpc.*;
-import umadb.v1.DCBGrpc;
-import umadb.v1.Umadb;
-
 import java.util.Iterator;
-import java.util.Optional;
 
-import static java.util.concurrent.TimeUnit.SECONDS;
+/**
+ * Main interface for interacting with the UmaDb event store.
+ * <p>
+ * Clients use this interface to append events, read events, and manage
+ * the connection to the UmaDb server. Implementations handle all
+ * network communication, serialization, and concurrency internally.
+ */
+public interface UmaDbClient {
 
-public class UmaDbClient {
+    /**
+     * Establishes a connection to the UmaDb server.
+     * <p>
+     * This method must be called before performing any operations
+     * such as appending or reading events.
+     *
+     * @throws UmaDbException if the connection cannot be established
+     */
+    void connect();
 
-    private static final Metadata.Key<byte[]> DETAILS = Metadata.Key.of(
-            "grpc-status-details-bin",
-            Metadata.BINARY_BYTE_MARSHALLER
-    );
+    /**
+     * Handles an append request, writing events to the event store.
+     * <p>
+     * The {@link AppendRequest} may include optional {@link AppendCondition}s
+     * that enforce conditional appends. Returns an {@link AppendResponse}
+     * containing the position of the last appended event.
+     *
+     * @param appendRequest the request describing the events to append
+     * @return the response containing the position of the last appended event
+     * @throws UmaDbException if the append fails (e.g., due to conditional constraints,
+     *                        serialization errors, or server issues)
+     */
+    AppendResponse handle(AppendRequest appendRequest);
 
-    private static final int TIMEOUT_TERMINATION_SECONDS = 5;
+    /**
+     * Handles a read request, returning an iterator over {@link ReadResponse} objects.
+     * <p>
+     * Each {@link ReadResponse} contains a batch of sequenced events and optionally
+     * the head position of the event stream at the time of the response. If
+     * {@link ReadRequest#subscribe()} is {@code true}, the iterator will continue
+     * to provide new events as they are appended.
+     *
+     * @param readRequest the request describing which events to read
+     * @return an iterator over {@link ReadResponse} batches
+     * @throws UmaDbException if the read fails (e.g., network error or serialization failure)
+     */
+    Iterator<ReadResponse> handle(ReadRequest readRequest);
 
-    private final ManagedChannel channel;
-    private final DCBGrpc.DCBBlockingStub blockingStub;
+    /**
+     * Returns the position of the most recent event in the event store.
+     * <p>
+     * This value can be used for optimistic concurrency control, checkpointing,
+     * or as a reference point for subsequent reads.
+     *
+     * @return the sequence number of the latest event
+     * @throws UmaDbException.IoException if the position cannot be retrieved
+     */
+    long getHeadPosition();
 
-    public UmaDbClient(String host, int port) {
-        this.channel = ManagedChannelBuilder.forAddress(host, port)
-                .usePlaintext()
-                .build();
-
-        this.blockingStub = DCBGrpc.newBlockingStub(channel);
-    }
-
-    public final AppendResponse handle(AppendRequest appendRequest) {
-        var umadbAppendRequest = UmaDbUtils.toUmadbAppendRequest(appendRequest);
-        try {
-            var umadbAppendResponse = blockingStub.append(umadbAppendRequest);
-            return new AppendResponse(umadbAppendResponse.getPosition());
-        } catch (StatusRuntimeException e) {
-            throw extractErrorResponse(e)
-                    .map(this::toUmaDbException)
-                    .orElseGet(() -> toUmaDbException(e));
-        }
-    }
-
-
-    private UmaDbException toUmaDbException(Umadb.ErrorResponse errorResponse) {
-        var errorMessage = errorResponse.getMessage();
-        return switch (errorResponse.getErrorType()) {
-            case IO -> new UmaDbException.IoException(errorMessage);
-            case SERIALIZATION -> new UmaDbException.SerializationException(errorMessage);
-            case INTEGRITY -> new UmaDbException.IntegrityException(errorMessage);
-            case CORRUPTION -> new UmaDbException.CorruptionException(errorMessage);
-            case INTERNAL -> new UmaDbException.InternalException(errorMessage);
-            case AUTHENTICATION -> new UmaDbException.AuthenticationException(errorMessage);
-            case UNRECOGNIZED -> new UmaDbException(errorMessage);
-        };
-    }
-
-    private UmaDbException toUmaDbException(StatusRuntimeException e) {
-        var errorMessage = e.getMessage();
-        return switch (e.getStatus().getCode()) {
-            case UNAUTHENTICATED -> new UmaDbException.AuthenticationException(errorMessage);
-            case FAILED_PRECONDITION -> new UmaDbException.IntegrityException(errorMessage);
-            case DATA_LOSS -> new UmaDbException.CorruptionException(errorMessage);
-            case INVALID_ARGUMENT -> new UmaDbException.SerializationException(errorMessage);
-            case INTERNAL -> new UmaDbException.InternalException(errorMessage);
-            default -> new UmaDbException("gRPC error: %s".formatted(errorMessage), e);
-        };
-    }
-
-    private Optional<Umadb.ErrorResponse> extractErrorResponse(StatusRuntimeException e) {
-        return Optional.ofNullable(e.getTrailers())
-                .flatMap(UmaDbClient::extractErrorResponseFromMetadata);
-    }
-
-    private static Optional<Umadb.ErrorResponse> extractErrorResponseFromMetadata(Metadata trailers) {
-        try {
-            return Optional.of(Umadb.ErrorResponse.parseFrom(trailers.get(DETAILS)));
-        } catch (InvalidProtocolBufferException ex) {
-            return Optional.empty();
-        }
-    }
-
-    public Iterator<ReadResponse> handle(ReadRequest readRequest) {
-        var umadbReadRequest = UmaDbUtils.toUmadbReadRequest(readRequest);
-        var grpcIterator = blockingStub.read(umadbReadRequest);
-        return new Iterator<>() {
-            @Override
-            public boolean hasNext() {
-                return grpcIterator.hasNext();
-            }
-
-            @Override
-            public ReadResponse next() {
-                Umadb.ReadResponse grpcResponse = grpcIterator.next();
-                return UmaDbUtils.toReadResponse(grpcResponse);
-            }
-        };
-    }
-
-    public long getHeadPosition() {
-        return blockingStub.head(Umadb.HeadRequest.getDefaultInstance()).getPosition();
-    }
-
-    public void shutdown() throws InterruptedException {
-        channel.shutdown().awaitTermination(TIMEOUT_TERMINATION_SECONDS, SECONDS);
-    }
+    /**
+     * Shuts down the client, closing any active connections and releasing resources.
+     * <p>
+     * After calling this method, the client should not be used for any further operations.
+     *
+     * @throws UmaDbException if the connection cannot be closed properly
+     */
+    void shutdown();
 }

@@ -1,237 +1,183 @@
 package io.umadb.client;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
-import java.util.UUID;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Integration tests for UmaDbClient using testcontainers.
+ * <p>
+ * Tests are executed in order to ensure predictable event positions.
+ */
 @Testcontainers
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class UmaDbClientTest {
 
     @Container
     private static final UmaDbContainer UMA_DB_CONTAINER = new UmaDbContainer();
 
-    UmaDbClient client;
+    private UmaDbClientImpl client;
 
     @BeforeEach
     void setUp() {
-        this.client = new UmaDbClient(
+        client = new UmaDbClientImpl(
                 UMA_DB_CONTAINER.getHost(),
                 UMA_DB_CONTAINER.getExposedGrpcPort()
         );
-    }
-
-    @Test
-    void testSimpleAppend() {
-        var data = "Hello123".getBytes(UTF_8);
-        var type = "test-type";
-
-        var eventsToAppend = List.of(
-                new Event(
-                    type,
-                    List.of(),
-                    data,
-                    null
-                )
-        );
-
-        var appendRequest = new AppendRequest(
-                eventsToAppend,
-                null
-        );
-
-        var response = client.handle(appendRequest);
-
-
-        assertNotNull(response);
-        assertTrue(response.position() > 0);
-
-        assertEquals(response.position(), client.getHeadPosition());
-
-    }
-
-    @Test
-    void testSimpleRead() {
-        var readRequest = new ReadRequest(
-                null,
-                0L,
-                null,
-                null,
-                null,
-                null
-        );
-        var iterator = client.handle(readRequest);
-
-        iterator.forEachRemaining(response -> {
-            System.out.println(response.events());
-        });
-    }
-
-    @Test
-    void testConditionalAppendIntegrityError() {
-        // Initial setup: Define the consistency boundary
-        var consistencyBoundary = new QueryItem(
-                List.of("example"), // event types
-                List.of("tag1", "tag2") // tags
-        );
-        var query = new Query(List.of(consistencyBoundary));
-
-        var lastPosition = client.getHeadPosition();
-
-        // First event to append (successful)
-        var event = new Event(
-                "example", // event type
-                List.of("tag1", "tag2"), // tags
-                "Hello, World!".getBytes(UTF_8),
-                null
-        );
-
-        var appendRequest1 = new AppendRequest(
-                List.of(event),
-                new AppendCondition(
-                        query,
-                        lastPosition
-                )
-        );
-
-        // Append first event, expect success
-        var response1 = client.handle(appendRequest1);
-        long lastKnownPosition = response1.position();
-        System.out.println("First event appended at position: " + lastKnownPosition);
-
-        // Second event, same as first, should fail due to integrity error
-        var conflictingEvent = new Event(
-                "example",
-                List.of("tag1", "tag2"),
-                "Hello, World!".getBytes(UTF_8),
-                null
-        );
-        var appendRequest2 = new AppendRequest(
-                List.of(conflictingEvent),
-                new AppendCondition(
-                        query, // same consistency boundary
-                        lastPosition
-                )
-        );
-
-        assertThrows(
-                UmaDbException.IntegrityException.class,
-                () -> client.handle(appendRequest2)
-        );
-
-    }
-
-    @Test
-    void testIdempotentAppend() {
-        // Define the consistency boundary (same as in previous test)
-
-        var consistencyBoundary = new QueryItem(
-                List.of("example"), // event types
-                List.of("tag1", "tag2") // tags
-        );
-        var query = new Query(List.of(consistencyBoundary));
-
-        // First event to append
-        var event = new Event(
-                "example", // event type
-                List.of("tag1", "tag2"), // tags
-                "Hello, World!".getBytes(UTF_8),
-                UUID.randomUUID()
-        );
-
-        var lastPosition = client.getHeadPosition();
-        var appendRequest1 = new AppendRequest(
-                List.of(event),
-                new AppendCondition(
-                        query, // same boundary
-                        lastPosition
-                )
-        );
-
-        // Append first event, expect success
-        var response1 = client.handle(appendRequest1);
-        long commitPosition1 = response1.position();
-        System.out.println("First event appended at position: " + commitPosition1);
-
-        // Retry with the same event
-        var appendRequest2 = new AppendRequest(
-                List.of(event),
-                new AppendCondition(
-                        query, // same boundary
-                        lastPosition
-                )
-        );
-        var response2 = client.handle(appendRequest2);
-        long commitPosition2 = response2.position();
-
-        // The commit position should be the same, indicating idempotent retry
-        assertEquals(commitPosition1, commitPosition2);
-        System.out.println("Idempotent retry returned position: " + commitPosition2);
-    }
-
-    @Test
-    void testGetHeadPosition() {
-        long headPosition = client.getHeadPosition();
-        System.out.println("Current head position: " + headPosition);
-
-        // Append a new event
-        var event = new Event(
-                "example", // event type
-                List.of("tag1", "tag2"), // tags
-                "New Event".getBytes(UTF_8),
-                UUID.randomUUID()
-        );
-
-        var appendRequest = new AppendRequest(
-                List.of(event),
-                null
-        );
-
-        client.handle(appendRequest);
-        long newHeadPosition = client.getHeadPosition();
-
-        // Ensure the head position has been updated
-        assertTrue(newHeadPosition > headPosition, "Head position should increase after appending a new event!");
-        System.out.println("New head position: " + newHeadPosition);
-    }
-
-    @Test
-    void testSubscribeToEvents() {
-        var readRequest = new ReadRequest(
-                null, // no specific query, just subscribe to all events
-                0L, // starting position
-                false, // not backwards
-                10, // limit number of events
-                true, // subscribe flag set to true
-                null // batch size not specified
-        );
-
-        var iterator = client.handle(readRequest);
-
-        boolean eventReceived = false;
-        while (iterator.hasNext()) {
-            var response = iterator.next();
-            System.out.println("Processing event: " + response.events());
-            eventReceived = true;
-
-            // Stop after receiving one event (for simplicity in this test)
-            break;
-        }
-
-        // Assert that at least one event was received
-        assertTrue(eventReceived, "No events received during subscription!");
+        client.connect();
     }
 
     @AfterEach
-    void cleanUp() throws InterruptedException {
+    void tearDown() {
         client.shutdown();
     }
 
+    // ----------------------
+    // Helper Methods
+    // ----------------------
+
+    private Event createEvent(String type, List<String> tags, String payload) {
+        return Event.of(type, tags, payload.getBytes(UTF_8));
+    }
+
+    private AppendCondition conditional(Query query, Long after) {
+        return AppendCondition.failIfExistsAfter(query, after != null ? after : 0L);
+    }
+
+    private QueryItem createQueryItem(List<String> types, List<String> tags) {
+        return QueryItem.of(types, tags);
+    }
+
+    private Query createQuery(QueryItem... items) {
+        return new Query(List.of(items));
+    }
+
+    // ----------------------
+    // Tests
+    // ----------------------
+
+    @Test
+    @Order(1)
+    void testSimpleAppendAndHeadPosition() {
+        Event event = Event.of("test-type", List.of("tag1"), "Hello123".getBytes(UTF_8));
+        AppendRequest request = new AppendRequest(List.of(event), null);
+
+        AppendResponse response = client.handle(request);
+
+        assertNotNull(response, "AppendResponse should not be null");
+        assertTrue(response.position() > 0, "Position should be greater than 0");
+        assertEquals(response.position(), client.getHeadPosition(), "Head position should match last appended position");
+    }
+
+    @Test
+    @Order(2)
+    void testConditionalAppendIntegrityException() {
+        QueryItem queryItem = createQueryItem(List.of("example"), List.of("tag1", "tag2"));
+        Query query = createQuery(queryItem);
+        long lastPosition = client.getHeadPosition();
+
+        Event firstEvent = createEvent("example", List.of("tag1", "tag2"), "Hello, World!");
+        AppendRequest appendRequest1 = new AppendRequest(
+                List.of(firstEvent),
+                conditional(query, lastPosition)
+        );
+
+        // First append succeeds
+        AppendResponse response1 = client.handle(appendRequest1);
+        assertTrue(response1.position() > lastPosition);
+
+        // Second append with same boundary should fail
+        Event conflictingEvent = createEvent("example", List.of("tag1", "tag2"), "Hello, World!");
+        AppendRequest appendRequest2 = new AppendRequest(
+                List.of(conflictingEvent),
+                conditional(query, lastPosition)
+        );
+
+        assertThrows(UmaDbException.IntegrityException.class,
+                () -> client.handle(appendRequest2),
+                "Appending conflicting event should throw IntegrityException");
+    }
+
+    @Test
+    @Order(3)
+    void testIdempotentAppendReturnsSamePosition() {
+        QueryItem queryItem = createQueryItem(List.of("example"), List.of("tag1", "tag2"));
+        Query query = createQuery(queryItem);
+        long lastPosition = client.getHeadPosition();
+
+        Event event = createEvent("example", List.of("tag1", "tag2"), "Hello, World!");
+        AppendRequest appendRequest1 = new AppendRequest(
+                List.of(event),
+                conditional(query, lastPosition)
+        );
+
+        AppendResponse response1 = client.handle(appendRequest1);
+
+        // Retry with the same event
+        AppendRequest appendRequest2 = new AppendRequest(
+                List.of(event),
+                conditional(query, lastPosition)
+        );
+
+        AppendResponse response2 = client.handle(appendRequest2);
+
+        assertEquals(response1.position(), response2.position(), "Retry should return same position (idempotent)");
+    }
+
+    @Test
+    @Order(4)
+    void testGetHeadPositionUpdatesAfterAppend() {
+        long initialHead = client.getHeadPosition();
+
+        Event event = createEvent("example", List.of("tag1", "tag2"), "New Event");
+        AppendRequest appendRequest = new AppendRequest(List.of(event), null);
+        client.handle(appendRequest);
+
+        long newHead = client.getHeadPosition();
+        assertTrue(newHead > initialHead, "Head position should increase after appending a new event");
+    }
+
+    @Test
+    @Order(5)
+    void testReadEvents() {
+        ReadRequest readRequest = new ReadRequest(null, 0L, null, null, null, null);
+        var iterator = client.handle(readRequest);
+
+        assertNotNull(iterator, "Iterator should not be null");
+
+        boolean hasEvents = false;
+        while (iterator.hasNext()) {
+            ReadResponse response = iterator.next();
+            response.events().forEach(se -> {
+                assertNotNull(se.event());
+                assertTrue(se.position() >= 0);
+            });
+            hasEvents = true;
+        }
+
+        assertTrue(hasEvents, "Read request should return at least one event");
+    }
+
+    @Test
+    @Order(6)
+    void testSubscribeToEventsReceivesAtLeastOne() {
+        ReadRequest subscribeRequest = new ReadRequest(null, 0L, false, 10, true, null);
+        var iterator = client.handle(subscribeRequest);
+
+        assertNotNull(iterator, "Iterator should not be null");
+
+        boolean eventReceived = false;
+        if (iterator.hasNext()) {
+            ReadResponse response = iterator.next();
+            assertNotNull(response.events());
+            eventReceived = !response.events().isEmpty();
+        }
+
+        assertTrue(eventReceived, "Subscription should receive at least one event");
+    }
 }
