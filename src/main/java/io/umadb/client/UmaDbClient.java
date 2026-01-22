@@ -12,6 +12,32 @@ import java.util.Iterator;
 public interface UmaDbClient {
 
     /**
+     * Creates a new {@link UmaDbClientBuilder} for constructing an
+     * {@link UmaDbClient} instance.
+     * <p>
+     * The builder allows configuring:
+     * <ul>
+     *   <li>Server host and port</li>
+     *   <li>TLS using a custom Certificate Authority (CA)</li>
+     *   <li>API key authentication</li>
+     * </ul>
+     *
+     * <h2>Example</h2>
+     * <pre>{@code
+     * UmaDbClient client = UmaDbClient.builder()
+     *     .withHostAndPort("localhost", 50051)
+     *     .withTls("/path/to/ca.pem")
+     *     .withApiKey("my-api-key")
+     *     .build();
+     * }</pre>
+     *
+     * @return a new {@link UmaDbClientBuilder}
+     */
+    static UmaDbClientBuilder builder() {
+        return new UmaDbClientBuilder();
+    }
+
+    /**
      * Establishes a connection to the UmaDb server.
      * <p>
      * This method must be called before performing any operations

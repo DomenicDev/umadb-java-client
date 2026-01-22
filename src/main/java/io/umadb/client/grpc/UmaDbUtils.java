@@ -1,5 +1,6 @@
-package io.umadb.client;
+package io.umadb.client.grpc;
 
+import io.umadb.client.*;
 import umadb.v1.Umadb;
 
 import java.util.UUID;

@@ -4,7 +4,11 @@ import org.junit.jupiter.api.*;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.*;
@@ -21,14 +25,15 @@ class UmaDbClientTest {
     @Container
     private static final UmaDbContainer UMA_DB_CONTAINER = new UmaDbContainer();
 
-    private UmaDbClientImpl client;
+    private UmaDbClient client;
 
     @BeforeEach
     void setUp() {
-        client = new UmaDbClientImpl(
-                UMA_DB_CONTAINER.getHost(),
-                UMA_DB_CONTAINER.getExposedGrpcPort()
-        );
+        client = UmaDbClient.builder()
+                .withHost(UMA_DB_CONTAINER.getHost())
+                .withPort(UMA_DB_CONTAINER.getExposedGrpcPort())
+                .build();
+
         client.connect();
     }
 
@@ -165,19 +170,62 @@ class UmaDbClientTest {
 
     @Test
     @Order(6)
-    void testSubscribeToEventsReceivesAtLeastOne() {
-        ReadRequest subscribeRequest = new ReadRequest(null, 0L, false, 10, true, null);
-        var iterator = client.handle(subscribeRequest);
+    void testSubscribeReceivesEventsAppendedAfterSubscription() throws Exception {
+        // Start subscription from current head (no historical events)
+        long startPosition = client.getHeadPosition();
 
-        assertNotNull(iterator, "Iterator should not be null");
+        ReadRequest subscribeRequest = new ReadRequest(
+                null,          // no query filter
+                startPosition + 1, // start from current head
+                false,
+                null,          // no limit
+                true,          // subscribe = true
+                null
+        );
 
-        boolean eventReceived = false;
-        if (iterator.hasNext()) {
-            ReadResponse response = iterator.next();
-            assertNotNull(response.events());
-            eventReceived = !response.events().isEmpty();
-        }
+        Iterator<ReadResponse> iterator = client.handle(subscribeRequest);
+        assertNotNull(iterator, "Iterator must not be null");
 
-        assertTrue(eventReceived, "Subscription should receive at least one event");
+        // Synchronization primitives
+        CountDownLatch eventReceivedLatch = new CountDownLatch(1);
+        AtomicReference<ReadResponse> receivedResponse = new AtomicReference<>();
+
+        // Consume the stream asynchronously
+        Thread subscriberThread = new Thread(() -> {
+            while (iterator.hasNext()) {
+                ReadResponse response = iterator.next();
+                if (!response.events().isEmpty()) {
+                    receivedResponse.set(response);
+                    eventReceivedLatch.countDown();
+                    break; // we only care about the first streamed event
+                }
+            }
+        });
+
+        subscriberThread.start();
+
+        // Give the subscription a moment to establish
+        Thread.sleep(200);
+
+        // Append a new event AFTER subscription started
+        Event event = Event.of(
+                "stream-test",
+                List.of("live"),
+                "streamed-event".getBytes(UTF_8)
+        );
+
+        client.handle(new AppendRequest(List.of(event), null));
+
+        // Wait for the event to arrive
+        boolean received = eventReceivedLatch.await(5, TimeUnit.SECONDS);
+        assertTrue(received, "Subscriber did not receive appended event in time");
+
+        ReadResponse response = receivedResponse.get();
+        assertNotNull(response);
+        assertEquals(1, response.events().size());
+
+        var receivedEvent = response.events().getFirst();
+        assertEquals("stream-test", receivedEvent.event().type());
     }
+
 }
