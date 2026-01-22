@@ -171,9 +171,6 @@ UmaDbException.IntegrityException
 
 ---
 
-### TODO
+## ToDo for Future Versions
 
 - Async client
-- JavaDoc
-- Non-null validation for fields in records
-- Publish artifacts on maven central
