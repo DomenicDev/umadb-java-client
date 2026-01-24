@@ -38,7 +38,9 @@ public final class UmaDbClientImpl implements UmaDbClient {
             Metadata.BINARY_BYTE_MARSHALLER
     );
 
-    /** Maximum time to wait for a graceful channel shutdown. */
+    /**
+     * Maximum time to wait for a graceful channel shutdown.
+     */
     private static final int TIMEOUT_TERMINATION_SECONDS = 15;
 
     private final String host;
@@ -55,11 +57,10 @@ public final class UmaDbClientImpl implements UmaDbClient {
     /**
      * Creates a new client implementation.
      *
-     * @param host        UmaDB server host
-     * @param port        UmaDB server port
-     * @param caFilePath  optional path to a CA certificate for TLS
-     * @param apiKey      optional API key (requires TLS)
-     *
+     * @param host       UmaDB server host
+     * @param port       UmaDB server port
+     * @param caFilePath optional path to a CA certificate for TLS
+     * @param apiKey     optional API key (requires TLS)
      * @throws IllegalArgumentException if arguments are invalid or insecure
      */
     public UmaDbClientImpl(String host, int port, String caFilePath, String apiKey) {
@@ -142,14 +143,17 @@ public final class UmaDbClientImpl implements UmaDbClient {
             var umadbAppendResponse = blockingStub.append(umadbAppendRequest);
             return new AppendResponse(umadbAppendResponse.getPosition());
         } catch (StatusRuntimeException e) {
-            throw extractErrorResponse(e)
-                    .map(this::toUmaDbException)
-                    .orElseGet(() -> toUmaDbException(e));
+            throw resolveUmaDbException(e);
         }
     }
 
+    private static UmaDbException resolveUmaDbException(StatusRuntimeException e) {
+        return extractErrorResponse(e)
+                .map(UmaDbClientImpl::toUmaDbException)
+                .orElseGet(() -> toUmaDbException(e));
+    }
 
-    private UmaDbException toUmaDbException(Umadb.ErrorResponse errorResponse) {
+    private static UmaDbException toUmaDbException(Umadb.ErrorResponse errorResponse) {
         var errorMessage = errorResponse.getMessage();
         return switch (errorResponse.getErrorType()) {
             case IO -> new UmaDbException.IoException(errorMessage);
@@ -162,7 +166,7 @@ public final class UmaDbClientImpl implements UmaDbClient {
         };
     }
 
-    private UmaDbException toUmaDbException(StatusRuntimeException e) {
+    private static UmaDbException toUmaDbException(StatusRuntimeException e) {
         var errorMessage = e.getMessage();
         return switch (e.getStatus().getCode()) {
             case UNAUTHENTICATED -> new UmaDbException.AuthenticationException(errorMessage);
@@ -174,7 +178,7 @@ public final class UmaDbClientImpl implements UmaDbClient {
         };
     }
 
-    private Optional<Umadb.ErrorResponse> extractErrorResponse(StatusRuntimeException e) {
+    private static Optional<Umadb.ErrorResponse> extractErrorResponse(StatusRuntimeException e) {
         return Optional.ofNullable(e.getTrailers())
                 .flatMap(UmaDbClientImpl::extractErrorResponseFromMetadata);
     }
@@ -199,24 +203,21 @@ public final class UmaDbClientImpl implements UmaDbClient {
     @Override
     public Iterator<ReadResponse> handle(ReadRequest readRequest) {
         var umadbReadRequest = UmaDbUtils.toUmadbReadRequest(readRequest);
-        var grpcIterator = blockingStub.read(umadbReadRequest);
-        return new Iterator<>() {
-            @Override
-            public boolean hasNext() {
-                return grpcIterator.hasNext();
-            }
-
-            @Override
-            public ReadResponse next() {
-                Umadb.ReadResponse grpcResponse = grpcIterator.next();
-                return UmaDbUtils.toReadResponse(grpcResponse);
-            }
-        };
+        try {
+            var grpcIterator = blockingStub.read(umadbReadRequest);
+            return new ReadResponseIterator(grpcIterator);
+        } catch (StatusRuntimeException e) {
+            throw resolveUmaDbException(e);
+        }
     }
 
     @Override
     public long getHeadPosition() {
-        return blockingStub.head(Umadb.HeadRequest.getDefaultInstance()).getPosition();
+        try {
+            return blockingStub.head(Umadb.HeadRequest.getDefaultInstance()).getPosition();
+        } catch (StatusRuntimeException e) {
+            throw resolveUmaDbException(e);
+        }
     }
 
     @Override
@@ -229,6 +230,28 @@ public final class UmaDbClientImpl implements UmaDbClient {
             isShutdown = true;
         } catch (InterruptedException e) {
             throw new UmaDbException(e.getMessage(), e);
+        }
+    }
+
+    private record ReadResponseIterator(Iterator<Umadb.ReadResponse> grpcIterator) implements Iterator<ReadResponse> {
+
+        @Override
+        public boolean hasNext() {
+            try {
+                return grpcIterator.hasNext();
+            } catch (StatusRuntimeException e) {
+                throw resolveUmaDbException(e);
+            }
+        }
+
+        @Override
+        public ReadResponse next() {
+            try {
+                Umadb.ReadResponse grpcResponse = grpcIterator.next();
+                return UmaDbUtils.toReadResponse(grpcResponse);
+            } catch (StatusRuntimeException e) {
+                throw resolveUmaDbException(e);
+            }
         }
     }
 }
