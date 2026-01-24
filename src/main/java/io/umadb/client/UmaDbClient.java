@@ -22,7 +22,6 @@ public interface UmaDbClient {
      *   <li>API key authentication</li>
      * </ul>
      *
-     * <h2>Example</h2>
      * <pre>{@code
      * UmaDbClient client = UmaDbClient.builder()
      *     .withHostAndPort("localhost", 50051)
