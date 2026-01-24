@@ -4,7 +4,24 @@ A lightweight Java client for interacting with the UmaDB event store via gRPC, s
 
 ## Installation
 
-TODO: Add maven/gradle packages once available.
+Add the following dependency to either the `build.gradle` or `pom.xml` file in your project.
+
+### Gradle
+
+```gradle
+implementation("io.github.domenicdev:umadb-java-client:0.1")
+```
+
+### Apache Maven
+
+```xml
+<dependency>
+    <groupId>io.github.domenicdev</groupId>
+    <artifactId>umadb-java-client</artifactId>
+    <version>0.1</version>
+</dependency>
+```
+
 
 ## Getting Started
 
@@ -171,6 +188,6 @@ UmaDbException.IntegrityException
 
 ---
 
-## ToDo for Future Versions
+## Planned for Future Versions
 
 - Async client
