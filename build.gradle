@@ -29,7 +29,7 @@ test {
 protobuf {
     protoc {
         // This pulls the Protobuf compiler version from Maven Central
-        artifact = "com.google.protobuf:protoc:3.25.8"
+        artifact = "com.google.protobuf:protoc:4.33.4"
     }
     plugins {
         grpc {
