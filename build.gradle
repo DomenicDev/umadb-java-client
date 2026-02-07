@@ -11,14 +11,19 @@ repositories {
     mavenCentral()
 }
 
-dependencies {
-    implementation 'io.grpc:grpc-netty-shaded:1.78.0'
-    implementation 'io.grpc:grpc-protobuf:1.78.0'
-    implementation 'io.grpc:grpc-stub:1.78.0'
+def grpcVersion = '1.79.0'
+def protocVersion = '3.25.8'
+def junitVersion = '6.0.2'
+def testcontainersVersion = '2.0.3'
 
-    testImplementation platform('org.junit:junit-bom:6.0.2')
+dependencies {
+    implementation "io.grpc:grpc-netty-shaded:${grpcVersion}"
+    implementation "io.grpc:grpc-protobuf:${grpcVersion}"
+    implementation "io.grpc:grpc-stub:${grpcVersion}"
+
+    testImplementation platform("org.junit:junit-bom:${junitVersion}")
     testImplementation 'org.junit.jupiter:junit-jupiter'
-    testImplementation 'org.testcontainers:testcontainers-junit-jupiter:2.0.3'
+    testImplementation "org.testcontainers:testcontainers-junit-jupiter:${testcontainersVersion}"
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -29,12 +34,12 @@ test {
 protobuf {
     protoc {
         // This pulls the Protobuf compiler version from Maven Central
-        artifact = "com.google.protobuf:protoc:3.25.8"
+        artifact = "com.google.protobuf:protoc:${protocVersion}"
     }
     plugins {
         grpc {
             // The gRPC Java code generator
-            artifact = "io.grpc:protoc-gen-grpc-java:1.78.0"
+            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
         }
     }
     generateProtoTasks {
