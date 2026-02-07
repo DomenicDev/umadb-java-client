@@ -130,25 +130,50 @@ public final class UmaDbExample {
 }
 ```
 
-### Using TLS and an API key
+### Using TLS and API Key 
 
-For secured deployments (TLS + API key), the builder makes this explicit and safe:
+To use a secured communication over TLS, simply enable TLS when building the UmaDbClient:
 
 ```java
 UmaDbClient client = UmaDbClient.builder()
         .withHost("localhost")
         .withPort(50051)
-        .withTlsAndApiKey(
-                "server.pem",                       // CA certificate
-                "umadb:example-api-key-123456789"   // API key
-        )
+        .withTlsEnabled()
         .build();
 
 client.connect();
 ```
 
-> ⚠️ Important:
-> An API key requires TLS. The client will fail fast if an API key is provided without TLS.
+You can also specify your own certificate authority like this (TLS will be automatically enabled): 
+
+```java
+UmaDbClient client = UmaDbClient.builder()
+        .withHost("localhost")
+        .withPort(50051)
+        .withCertificateAuthority("server.pem")
+        .build();
+```
+
+For API key-protected servers, use the `withApiKey` when building the client:  
+
+```java
+UmaDbClient client = UmaDbClient.builder()
+        .withHost("localhost")
+        .withPort(50051)
+        .withApiKey("umadb:example-api-key-123456789")
+        .build();
+```
+
+To specify both CA + API key, simply use the corresponding builder methods:
+
+```java
+UmaDbClient client = UmaDbClient.builder()
+        .withHost("localhost")
+        .withPort(50051)
+        .withCertificateAuthority("server.pem")
+        .withApiKey("umadb:example-api-key-123456789")
+        .build();
+```
 
 ### Conditional append (optimistic concurrency)
 
