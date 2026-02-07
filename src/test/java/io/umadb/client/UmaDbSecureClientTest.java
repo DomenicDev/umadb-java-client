@@ -30,7 +30,7 @@ class UmaDbSecureClientTest {
         var client = UmaDbClient.builder()
                 .withHost(SECURED_UMA_DB_CONTAINER.getHost())
                 .withPort(SECURED_UMA_DB_CONTAINER.getExposedGrpcPort())
-                .withTls(CLASS_PATH_TLS_CERT)
+                .withCertificateAuthority(CLASS_PATH_TLS_CERT)
                 .withApiKey(TEST_API_KEY)
                 .build();
 
@@ -66,7 +66,7 @@ class UmaDbSecureClientTest {
                     var client = UmaDbClient.builder()
                             .withHost(SECURED_UMA_DB_CONTAINER.getHost())
                             .withPort(SECURED_UMA_DB_CONTAINER.getExposedGrpcPort())
-                            .withTls(CLASS_PATH_TLS_CERT)
+                            .withCertificateAuthority(CLASS_PATH_TLS_CERT)
                             .build();
 
                     client.connect();

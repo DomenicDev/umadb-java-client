@@ -36,6 +36,7 @@ public final class UmaDbClientBuilder {
 
     private String host;
     private int port = -1;
+    private boolean tlsEnabled;
     private String caFilePath;
     private String apiKey;
 
@@ -75,6 +76,16 @@ public final class UmaDbClientBuilder {
     }
 
     /**
+     * Enables TLS with default settings.
+     *
+     * @return this builder instance
+     */
+    public UmaDbClientBuilder withTlsEnabled() {
+        this.tlsEnabled = true;
+        return this;
+    }
+
+    /**
      * Enables TLS using a custom Certificate Authority (CA) certificate.
      * <p>
      * This is typically required when connecting to servers using
@@ -84,7 +95,8 @@ public final class UmaDbClientBuilder {
      * @param caFilePath path to the CA certificate file (PEM format)
      * @return this builder instance
      */
-    public UmaDbClientBuilder withTls(String caFilePath) {
+    public UmaDbClientBuilder withCertificateAuthority(String caFilePath) {
+        this.tlsEnabled = true;
         this.caFilePath = caFilePath;
         return this;
     }
@@ -97,26 +109,14 @@ public final class UmaDbClientBuilder {
      * </p>
      *
      * <p>
-     * <strong>Note:</strong> TLS must be enabled when using an API key.
+     * <strong>Note:</strong> TLS is automatically enabled when using an API key.
      * </p>
      *
      * @param apiKey the API key to use for authentication
      * @return this builder instance
      */
     public UmaDbClientBuilder withApiKey(String apiKey) {
-        this.apiKey = apiKey;
-        return this;
-    }
-
-    /**
-     * Enables both TLS and API key authentication in a single call.
-     *
-     * @param caFilePath path to the CA certificate file (PEM format)
-     * @param apiKey the API key to use for authentication
-     * @return this builder instance
-     */
-    public UmaDbClientBuilder withTlsAndApiKey(String caFilePath, String apiKey) {
-        this.caFilePath = caFilePath;
+        this.tlsEnabled = true;
         this.apiKey = apiKey;
         return this;
     }
@@ -132,6 +132,7 @@ public final class UmaDbClientBuilder {
         return new UmaDbClientImpl(
                 host,
                 port,
+                tlsEnabled,
                 caFilePath,
                 apiKey
         );

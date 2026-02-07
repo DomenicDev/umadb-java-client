@@ -45,6 +45,7 @@ public final class UmaDbClientImpl implements UmaDbClient {
 
     private final String host;
     private final int port;
+    private final boolean tlsEnabled;
     private final String optionalApiKey;
     private final Path optionalCaFilePath;
 
@@ -59,11 +60,18 @@ public final class UmaDbClientImpl implements UmaDbClient {
      *
      * @param host       UmaDB server host
      * @param port       UmaDB server port
+     * @param tlsEnabled indicates whether an encrypted communication (TLS) is to be used
      * @param caFilePath optional path to a CA certificate for TLS
      * @param apiKey     optional API key (requires TLS)
      * @throws IllegalArgumentException if arguments are invalid or insecure
      */
-    public UmaDbClientImpl(String host, int port, String caFilePath, String apiKey) {
+    public UmaDbClientImpl(
+            String host,
+            int port,
+            boolean tlsEnabled,
+            String caFilePath,
+            String apiKey
+    ) {
         if (host == null) {
             throw new IllegalArgumentException("host must not be null");
         }
@@ -72,12 +80,17 @@ public final class UmaDbClientImpl implements UmaDbClient {
         }
 
         // Enforce security: API keys must never be sent over plaintext channels
-        if (apiKey != null && caFilePath == null) {
-            throw new IllegalArgumentException("TLS cert file must be defined when using API key");
+        if (apiKey != null && !tlsEnabled) {
+            throw new IllegalArgumentException("TLS must be enabled when using API key");
+        }
+
+        if (!tlsEnabled && caFilePath != null) {
+            throw new IllegalArgumentException("TLS must be enabled when using custom CA");
         }
 
         this.host = host;
         this.port = port;
+        this.tlsEnabled = tlsEnabled;
         this.optionalApiKey = apiKey;
         this.optionalCaFilePath = Optional.ofNullable(caFilePath).map(Path::of).orElse(null);
     }
@@ -127,13 +140,21 @@ public final class UmaDbClientImpl implements UmaDbClient {
     private ChannelCredentials resolveChannelCredentials() throws IOException {
         return isTlsEnabled() ?
                 getTlsChannelCredentials() :
-                InsecureChannelCredentials.create();
+                getInsecureChannelCredentials();
     }
 
     private ChannelCredentials getTlsChannelCredentials() throws IOException {
-        return TlsChannelCredentials.newBuilder()
-                .trustManager(optionalCaFilePath.toFile())
-                .build();
+        if (optionalCaFilePath != null) {
+            return TlsChannelCredentials.newBuilder()
+                    .trustManager(optionalCaFilePath.toFile())
+                    .build();
+        } else {
+            return TlsChannelCredentials.create();
+        }
+    }
+
+    private ChannelCredentials getInsecureChannelCredentials() {
+        return InsecureChannelCredentials.create();
     }
 
     @Override
@@ -197,7 +218,7 @@ public final class UmaDbClientImpl implements UmaDbClient {
     }
 
     private boolean isTlsEnabled() {
-        return this.optionalCaFilePath != null;
+        return this.tlsEnabled;
     }
 
     @Override
