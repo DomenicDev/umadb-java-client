@@ -12,7 +12,7 @@ repositories {
 }
 
 def grpcVersion = '1.82.0'
-def protocVersion = '3.25.8'
+def protocVersion = '4.35.1'
 def junitVersion = '6.1.0'
 def testcontainersVersion = '2.0.5'
 
