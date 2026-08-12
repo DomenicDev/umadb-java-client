@@ -16,7 +16,6 @@ class ReadRequestTest {
         assertNull(request.start());
         assertFalse(request.backwards());
         assertNull(request.limit());
-        assertFalse(request.subscribe());
         assertNull(request.batchSize());
     }
 
@@ -28,7 +27,6 @@ class ReadRequestTest {
         assertNull(request.start());
         assertFalse(request.backwards());
         assertNull(request.limit());
-        assertFalse(request.subscribe());
         assertNull(request.batchSize());
     }
 
@@ -54,33 +52,32 @@ class ReadRequestTest {
     }
 
     @Test
-    void subscribe_shouldReturnRequestWithSubscriptionEnabled() {
-        ReadRequest request = ReadRequest.all().subscribe(10);
+    void withBatchSize_shouldReturnRequestWithUpdatedBatchSize() {
+        ReadRequest request = ReadRequest.all().withBatchSize(10);
 
-        assertTrue(request.subscribe());
         assertEquals(10, request.batchSize());
     }
 
     @Test
     void constructor_shouldThrowException_forNegativeStart() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ReadRequest(QUERY, -1L, null, null, null, null));
+                () -> new ReadRequest(QUERY, -1L, null, null, null));
     }
 
     @Test
     void constructor_shouldThrowException_forZeroOrNegativeLimit() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ReadRequest(QUERY, null, null, 0, null, null));
+                () -> new ReadRequest(QUERY, null, null, 0, null));
         assertThrows(IllegalArgumentException.class,
-                () -> new ReadRequest(QUERY, null, null, -1, null, null));
+                () -> new ReadRequest(QUERY, null, null, -1, null));
     }
 
     @Test
     void constructor_shouldThrowException_forZeroOrNegativeBatchSize() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ReadRequest(QUERY, null, null, null, true, 0));
+                () -> new ReadRequest(QUERY, null, null, null, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> new ReadRequest(QUERY, null, null, null, true, -5));
+                () -> new ReadRequest(QUERY, null, null, null, -5));
     }
 
 }

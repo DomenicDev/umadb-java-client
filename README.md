@@ -2,6 +2,8 @@
 
 A lightweight Java client for interacting with the UmaDB event store via gRPC, supporting event appends, queries, and live event streaming.
 
+> **Requires UmaDB 0.7.5 or newer.** This release targets the `umadb.v1` proto as of UmaDB 0.7.5 and is not compatible with older servers.
+
 ## Installation
 
 Add the following dependency to either the `build.gradle` or `pom.xml` file in your project.
@@ -73,8 +75,7 @@ public final class UmaDbExample {
                     0L,     // start from the beginning
                     false,  // forwards
                     10,     // limit
-                    false,  // do not subscribe
-                    null
+                    null    // default batch size
             );
 
             Iterator<ReadResponse> readIterator = client.handle(readRequest);
@@ -96,20 +97,15 @@ public final class UmaDbExample {
             // -----------------------------------------------------------------
             long startPosition = client.getHeadPosition();
 
-            ReadRequest subscribeRequest = new ReadRequest(
-                    null,          // no query
-                    startPosition, // start from current head
-                    false,
-                    null,          // unlimited
-                    true,          // subscribe
-                    null
-            );
+            SubscribeRequest subscribeRequest = SubscribeRequest
+                    .all()               // no query filter
+                    .after(startPosition); // resume from current head
 
-            Iterator<ReadResponse> subscription = client.handle(subscribeRequest);
+            Iterator<SubscribeResponse> subscription = client.subscribe(subscribeRequest);
 
             System.out.println("Subscribed to new events...");
             while (subscription.hasNext()) {
-                ReadResponse response = subscription.next();
+                SubscribeResponse response = subscription.next();
                 response.events().forEach(sequencedEvent -> {
                     System.out.println(
                             "Received new event at position "
@@ -178,7 +174,7 @@ UmaDbClient client = UmaDbClient.builder()
 ### Conditional append (optimistic concurrency)
 
 ```java
-QueryItem boundary = QueryItem.ofTypesAndTags(
+QueryItem boundary = QueryItem.of(
         List.of("order-created"),
         List.of("order-123")
 );
@@ -210,6 +206,90 @@ If a matching event already exists after the given position, the append will fai
 ```java
 UmaDbException.IntegrityException
 ```
+
+### Event metadata
+
+Events can carry metadata — contextual key/value pairs such as correlation IDs or user
+agents that are not part of the payload itself:
+
+```java
+Event event = Event.of(
+                "order-created",
+                List.of("order-123"),
+                "Order created".getBytes(StandardCharsets.UTF_8)
+        )
+        .withMetadata("correlation-id", "b7f1c3e4")
+        .withMetadata("user-agent", "checkout-service/2.1");
+
+client.handle(AppendRequest.of(List.of(event)));
+```
+
+Metadata is returned with every event that is read or streamed back:
+
+```java
+Map<String, String> metadata = sequencedEvent.event().metadata();
+```
+
+Events created without metadata expose an empty map, never `null`.
+
+### Tracking consumer progress
+
+A consumer can checkpoint how far it has processed by attaching `TrackingInfo` to an
+append. The cursor advances atomically with the append, so the checkpoint can never
+drift from the events it describes:
+
+```java
+AppendRequest request = AppendRequest
+        .of(List.of(event))
+        .withTrackingInfo(TrackingInfo.of("order-projection", lastProcessedPosition));
+
+client.handle(request);
+```
+
+The saved position can be read back when the consumer restarts, so it can resume from
+where it left off:
+
+```java
+long resumeFrom = client.getTrackingInfo("order-projection").orElse(0L);
+
+Iterator<SubscribeResponse> subscription =
+        client.subscribe(SubscribeRequest.all().after(resumeFrom));
+```
+
+`getTrackingInfo` returns `Optional.empty()` for a source that has never been
+checkpointed.
+
+---
+
+## Migrating from 0.5
+
+This release targets the UmaDB 0.7.5 proto and contains breaking changes.
+
+**`ReadRequest` no longer has a `subscribe` flag.** Reads now always terminate at the
+head position captured when the request was received. Live streaming moved to a
+dedicated RPC:
+
+```java
+// Before
+ReadRequest request = new ReadRequest(query, position, false, null, true, null);
+Iterator<ReadResponse> stream = client.handle(request);
+
+// After
+SubscribeRequest request = SubscribeRequest.of(query).after(position);
+Iterator<SubscribeResponse> stream = client.subscribe(request);
+```
+
+Note that `ReadRequest`'s canonical constructor lost a component and now takes five
+arguments, and `ReadRequest.subscribe(Integer)` has been removed.
+
+**`UmaDbException.InvalidArgumentException` is new.** Malformed requests previously
+surfaced as `SerializationException`; they now map to the more accurate
+`InvalidArgumentException`. Code catching `SerializationException` for this case needs
+updating.
+
+**`Event`, `SequencedEvent`, and `AppendRequest` gained components** (`metadata` and
+`trackingInfo`). Their previous constructor arities still work and default the new
+fields, so existing call sites keep compiling.
 
 ---
 

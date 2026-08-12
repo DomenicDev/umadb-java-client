@@ -6,7 +6,7 @@ import org.testcontainers.utility.MountableFile;
 
 public class UmaDbContainer extends GenericContainer<UmaDbContainer> {
 
-    public static final String DEFAULT_TAG = "0.5";
+    public static final String DEFAULT_TAG = "0.7.5";
 
     public static final String ENV_UMADB_API_KEY = "UMADB_API_KEY";
     public static final String ENV_UMADB_TLS_CERT = "UMADB_TLS_CERT";

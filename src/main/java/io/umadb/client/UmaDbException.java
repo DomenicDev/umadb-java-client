@@ -75,4 +75,14 @@ public sealed class UmaDbException extends RuntimeException {
             super(message);
         }
     }
+
+    /**
+     * Indicates that the request was malformed or contained invalid parameters,
+     * such as an out-of-range position or an unusable query.
+     */
+    public static final class InvalidArgumentException extends UmaDbException {
+        public InvalidArgumentException(String message) {
+            super(message);
+        }
+    }
 }

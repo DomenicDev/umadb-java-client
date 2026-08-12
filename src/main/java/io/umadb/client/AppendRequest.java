@@ -10,10 +10,14 @@ import java.util.List;
  * @param condition
  *        an optional {@link AppendCondition} that must be satisfied
  *        for the append operation to succeed; may be {@code null}
+ * @param trackingInfo
+ *        optional checkpointing information advancing the source's tracking
+ *        cursor when the append succeeds; may be {@code null}
  */
 public record AppendRequest(
         List<Event> events,
-        AppendCondition condition
+        AppendCondition condition,
+        TrackingInfo trackingInfo
 ) {
 
     /**
@@ -30,6 +34,17 @@ public record AppendRequest(
     }
 
     /**
+     * Creates an {@code AppendRequest} without tracking info.
+     *
+     * @param events    the events to append
+     * @param condition the append condition to apply; may be {@code null}
+     * @throws IllegalArgumentException if {@code events} is {@code null} or empty
+     */
+    public AppendRequest(List<Event> events, AppendCondition condition) {
+        this(events, condition, null);
+    }
+
+    /**
      * Creates an {@code AppendRequest} without any append condition.
      *
      * @param events the events to append
@@ -37,7 +52,7 @@ public record AppendRequest(
      * @throws IllegalArgumentException if {@code events} is {@code null} or empty
      */
     public static AppendRequest of(List<Event> events) {
-        return new AppendRequest(events, null);
+        return new AppendRequest(events, null, null);
     }
 
     /**
@@ -49,7 +64,7 @@ public record AppendRequest(
      * @throws IllegalArgumentException if {@code events} is {@code null} or empty
      */
     public static AppendRequest of(List<Event> events, AppendCondition condition) {
-        return new AppendRequest(events, condition);
+        return new AppendRequest(events, condition, null);
     }
 
     /**
@@ -59,6 +74,17 @@ public record AppendRequest(
      * @return a new {@code AppendRequest} with the specified condition
      */
     public AppendRequest withCondition(AppendCondition condition) {
-        return new AppendRequest(this.events, condition);
+        return new AppendRequest(this.events, condition, this.trackingInfo);
+    }
+
+    /**
+     * Returns a copy of this request that also advances the given tracking cursor
+     * when the append succeeds.
+     *
+     * @param trackingInfo the tracking info to checkpoint; may be {@code null}
+     * @return a new {@code AppendRequest} with the specified tracking info
+     */
+    public AppendRequest withTrackingInfo(TrackingInfo trackingInfo) {
+        return new AppendRequest(this.events, this.condition, trackingInfo);
     }
 }

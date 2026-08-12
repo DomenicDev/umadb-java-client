@@ -183,6 +183,7 @@ public final class UmaDbClientImpl implements UmaDbClient {
             case CORRUPTION -> new UmaDbException.CorruptionException(errorMessage);
             case INTERNAL -> new UmaDbException.InternalException(errorMessage);
             case AUTHENTICATION -> new UmaDbException.AuthenticationException(errorMessage);
+            case INVALID_ARGUMENT -> new UmaDbException.InvalidArgumentException(errorMessage);
             case UNRECOGNIZED -> new UmaDbException(errorMessage);
         };
     }
@@ -193,7 +194,7 @@ public final class UmaDbClientImpl implements UmaDbClient {
             case UNAUTHENTICATED -> new UmaDbException.AuthenticationException(errorMessage);
             case FAILED_PRECONDITION -> new UmaDbException.IntegrityException(errorMessage);
             case DATA_LOSS -> new UmaDbException.CorruptionException(errorMessage);
-            case INVALID_ARGUMENT -> new UmaDbException.SerializationException(errorMessage);
+            case INVALID_ARGUMENT -> new UmaDbException.InvalidArgumentException(errorMessage);
             case INTERNAL -> new UmaDbException.InternalException(errorMessage);
             default -> new UmaDbException("gRPC error: %s".formatted(errorMessage), e);
         };
@@ -211,7 +212,7 @@ public final class UmaDbClientImpl implements UmaDbClient {
                         Umadb.ErrorResponse.parseFrom(trailers.get(DETAILS))
                 );
             }
-        } catch (InvalidProtocolBufferException ignored) {
+        } catch (InvalidProtocolBufferException _) {
             // Fall back to generic gRPC error handling
         }
         return Optional.empty();
@@ -227,6 +228,30 @@ public final class UmaDbClientImpl implements UmaDbClient {
         try {
             var grpcIterator = blockingStub.read(umadbReadRequest);
             return new ReadResponseIterator(grpcIterator);
+        } catch (StatusRuntimeException e) {
+            throw resolveUmaDbException(e);
+        }
+    }
+
+    @Override
+    public Iterator<SubscribeResponse> subscribe(SubscribeRequest subscribeRequest) {
+        var umadbSubscribeRequest = UmaDbUtils.toUmadbSubscribeRequest(subscribeRequest);
+        try {
+            var grpcIterator = blockingStub.subscribe(umadbSubscribeRequest);
+            return new SubscribeResponseIterator(grpcIterator);
+        } catch (StatusRuntimeException e) {
+            throw resolveUmaDbException(e);
+        }
+    }
+
+    @Override
+    public Optional<Long> getTrackingInfo(String source) {
+        if (source == null || source.isBlank()) {
+            throw new IllegalArgumentException("source must not be null or blank");
+        }
+        try {
+            var response = blockingStub.getTrackingInfo(UmaDbUtils.toUmadbTrackingRequest(source));
+            return response.hasPosition() ? Optional.of(response.getPosition()) : Optional.empty();
         } catch (StatusRuntimeException e) {
             throw resolveUmaDbException(e);
         }
@@ -250,6 +275,7 @@ public final class UmaDbClientImpl implements UmaDbClient {
             channel.shutdown().awaitTermination(TIMEOUT_TERMINATION_SECONDS, SECONDS);
             isShutdown = true;
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new UmaDbException(e.getMessage(), e);
         }
     }
@@ -270,6 +296,29 @@ public final class UmaDbClientImpl implements UmaDbClient {
             try {
                 Umadb.ReadResponse grpcResponse = grpcIterator.next();
                 return UmaDbUtils.toReadResponse(grpcResponse);
+            } catch (StatusRuntimeException e) {
+                throw resolveUmaDbException(e);
+            }
+        }
+    }
+
+    private record SubscribeResponseIterator(Iterator<Umadb.SubscribeResponse> grpcIterator)
+            implements Iterator<SubscribeResponse> {
+
+        @Override
+        public boolean hasNext() {
+            try {
+                return grpcIterator.hasNext();
+            } catch (StatusRuntimeException e) {
+                throw resolveUmaDbException(e);
+            }
+        }
+
+        @Override
+        public SubscribeResponse next() {
+            try {
+                Umadb.SubscribeResponse grpcResponse = grpcIterator.next();
+                return UmaDbUtils.toSubscribeResponse(grpcResponse);
             } catch (StatusRuntimeException e) {
                 throw resolveUmaDbException(e);
             }

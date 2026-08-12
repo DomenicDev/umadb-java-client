@@ -1,6 +1,7 @@
 package io.umadb.client;
 
 import java.util.Iterator;
+import java.util.Optional;
 
 /**
  * Main interface for interacting with the UmaDb event store.
@@ -64,15 +65,44 @@ public interface UmaDbClient {
      * Handles a read request, returning an iterator over {@link ReadResponse} objects.
      * <p>
      * Each {@link ReadResponse} contains a batch of sequenced events and optionally
-     * the head position of the event stream at the time of the response. If
-     * {@link ReadRequest#subscribe()} is {@code true}, the iterator will continue
-     * to provide new events as they are appended.
+     * the head position of the event stream at the time of the response. The iterator
+     * is exhausted once the head position captured at request time has been reached;
+     * to keep receiving events as they are appended, use
+     * {@link #subscribe(SubscribeRequest)} instead.
      *
      * @param readRequest the request describing which events to read
      * @return an iterator over {@link ReadResponse} batches
      * @throws UmaDbException if the read fails (e.g., network error or serialization failure)
      */
     Iterator<ReadResponse> handle(ReadRequest readRequest);
+
+    /**
+     * Opens a continuous subscription, returning an iterator over
+     * {@link SubscribeResponse} batches.
+     * <p>
+     * The subscription first replays already-recorded events matching the request
+     * and then blocks, yielding further batches as new events are appended. The
+     * iterator does not terminate on its own; call {@link #shutdown()} to end the
+     * stream.
+     *
+     * @param subscribeRequest the request describing which events to subscribe to
+     * @return an iterator over {@link SubscribeResponse} batches
+     * @throws UmaDbException if the subscription fails (e.g., network error)
+     */
+    Iterator<SubscribeResponse> subscribe(SubscribeRequest subscribeRequest);
+
+    /**
+     * Returns the last recorded position for a named source.
+     * <p>
+     * Sources are checkpointed by attaching {@link TrackingInfo} to an
+     * {@link AppendRequest}.
+     *
+     * @param source the unique identifier of the consumer or projection
+     * @return the position the source has processed up to, or
+     *         {@link Optional#empty()} if no tracking info exists for it
+     * @throws UmaDbException if the lookup fails
+     */
+    Optional<Long> getTrackingInfo(String source);
 
     /**
      * Returns the position of the most recent event in the event store.

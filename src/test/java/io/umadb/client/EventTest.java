@@ -2,7 +2,9 @@ package io.umadb.client;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -24,6 +26,64 @@ class EventTest {
         assertEquals(tags, event.tags());
         assertArrayEquals(DATA, event.data());
         assertEquals(id, event.id());
+        assertEquals(Map.of(), event.metadata());
+    }
+
+    @Test
+    void constructor_shouldTreatNullMetadataAsEmpty() {
+        Event event = new Event(TYPE, List.of(TAG), DATA, UUID.randomUUID(), null);
+
+        assertEquals(Map.of(), event.metadata());
+    }
+
+    @Test
+    void constructor_shouldDefensivelyCopyMetadata() {
+        var mutableMetadata = new LinkedHashMap<String, String>();
+        mutableMetadata.put("k", "v");
+
+        Event event = new Event(TYPE, List.of(TAG), DATA, UUID.randomUUID(), mutableMetadata);
+        mutableMetadata.put("added-later", "should-not-appear");
+
+        assertEquals(Map.of("k", "v"), event.metadata());
+        assertThrows(UnsupportedOperationException.class,
+                () -> event.metadata().put("x", "y"));
+    }
+
+    @Test
+    void withMetadata_shouldAddEntryAndPreserveExisting() {
+        Event event = Event.of(TYPE, List.of(TAG), DATA)
+                .withMetadata("first", "1")
+                .withMetadata("second", "2");
+
+        assertEquals(Map.of("first", "1", "second", "2"), event.metadata());
+    }
+
+    @Test
+    void withMetadata_shouldReplaceEntryWithSameKey() {
+        Event event = Event.of(TYPE, List.of(TAG), DATA)
+                .withMetadata("key", "old")
+                .withMetadata("key", "new");
+
+        assertEquals(Map.of("key", "new"), event.metadata());
+    }
+
+    @Test
+    void withMetadata_shouldPreserveMetadataAcrossWithId() {
+        UUID newId = UUID.randomUUID();
+        Event event = Event.of(TYPE, List.of(TAG), DATA)
+                .withMetadata("key", "value")
+                .withId(newId);
+
+        assertEquals(newId, event.id());
+        assertEquals(Map.of("key", "value"), event.metadata());
+    }
+
+    @Test
+    void withMetadata_shouldThrowException_forNullKeyOrValue() {
+        Event event = Event.of(TYPE, List.of(TAG), DATA);
+
+        assertThrows(IllegalArgumentException.class, () -> event.withMetadata(null, "v"));
+        assertThrows(IllegalArgumentException.class, () -> event.withMetadata("k", null));
     }
 
     @Test
