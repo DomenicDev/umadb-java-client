@@ -1,8 +1,8 @@
 # UmaDB Java Client
 
-A lightweight Java client for interacting with the UmaDB event store via gRPC, supporting event appends, queries, and live event streaming.
+A lightweight Java client for interacting with the [UmaDB event store](https://umadb.io/) via gRPC, supporting event appends, queries, and live event streaming.
 
-> **Requires UmaDB 0.7.5 or newer.** This release targets the `umadb.v1` proto as of UmaDB 0.7.5 and is not compatible with older servers.
+> **Requires UmaDB 0.7.5 or newer.**
 
 ## Installation
 
