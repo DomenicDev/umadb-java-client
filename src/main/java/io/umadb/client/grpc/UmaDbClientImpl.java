@@ -1,16 +1,18 @@
 package io.umadb.client.grpc;
 
-import com.google.protobuf.InvalidProtocolBufferException;
-import io.grpc.*;
+import io.grpc.Context;
+import io.grpc.StatusRuntimeException;
 import io.umadb.client.*;
 import umadb.v1.DCBGrpc;
 import umadb.v1.Umadb;
 
-import java.io.IOException;
-import java.nio.file.Path;
-import java.util.*;
-
-import static java.util.concurrent.TimeUnit.SECONDS;
+import java.util.Iterator;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.function.Function;
 
 /**
  * Internal gRPC-based implementation of {@link UmaDbClient}.
@@ -29,30 +31,14 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  */
 public final class UmaDbClientImpl implements UmaDbClient {
 
-    /**
-     * gRPC metadata key used to extract structured UmaDB error details
-     * returned by the server.
-     */
-    private static final Metadata.Key<byte[]> DETAILS = Metadata.Key.of(
-            "grpc-status-details-bin",
-            Metadata.BINARY_BYTE_MARSHALLER
-    );
+    private final GrpcConnection connection;
 
     /**
-     * Maximum time to wait for a graceful channel shutdown.
+     * Contexts of streams still open, so that shutdown can cancel any the caller has
+     * stopped consuming.
      */
-    private static final int TIMEOUT_TERMINATION_SECONDS = 15;
+    private final Set<Context.CancellableContext> liveStreamContexts = ConcurrentHashMap.newKeySet();
 
-    private final String host;
-    private final int port;
-    private final boolean tlsEnabled;
-    private final String optionalApiKey;
-    private final Path optionalCaFilePath;
-
-    private boolean isConnected = false;
-    private boolean isShutdown = false;
-
-    private ManagedChannel channel;
     private DCBGrpc.DCBBlockingStub blockingStub;
 
     /**
@@ -72,89 +58,40 @@ public final class UmaDbClientImpl implements UmaDbClient {
             String caFilePath,
             String apiKey
     ) {
-        if (host == null) {
-            throw new IllegalArgumentException("host must not be null");
-        }
-        if (port <= 0) {
-            throw new IllegalArgumentException("port must be strictly positive");
-        }
+        this(host, port, tlsEnabled, caFilePath, apiKey, null);
+    }
 
-        // Enforce security: API keys must never be sent over plaintext channels
-        if (apiKey != null && !tlsEnabled) {
-            throw new IllegalArgumentException("TLS must be enabled when using API key");
-        }
-
-        if (!tlsEnabled && caFilePath != null) {
-            throw new IllegalArgumentException("TLS must be enabled when using custom CA");
-        }
-
-        this.host = host;
-        this.port = port;
-        this.tlsEnabled = tlsEnabled;
-        this.optionalApiKey = apiKey;
-        this.optionalCaFilePath = Optional.ofNullable(caFilePath).map(Path::of).orElse(null);
+    /**
+     * Creates a new client implementation dispatching gRPC callbacks on the given executor.
+     *
+     * @param host       UmaDB server host
+     * @param port       UmaDB server port
+     * @param tlsEnabled indicates whether an encrypted communication (TLS) is to be used
+     * @param caFilePath optional path to a CA certificate for TLS
+     * @param apiKey     optional API key (requires TLS)
+     * @param executor   optional executor for gRPC callbacks; {@code null} uses the gRPC default
+     * @throws IllegalArgumentException if arguments are invalid or insecure
+     */
+    public UmaDbClientImpl(
+            String host,
+            int port,
+            boolean tlsEnabled,
+            String caFilePath,
+            String apiKey,
+            Executor executor
+    ) {
+        this.connection = new GrpcConnection(
+                new ConnectionSettings(host, port, tlsEnabled, caFilePath, apiKey, executor)
+        );
     }
 
     @Override
     public void connect() {
-        if (isConnected) {
+        if (connection.isConnected()) {
             return;
         }
-
-        try {
-            ChannelCredentials channelCredentials = resolveChannelCredentials();
-            List<ClientInterceptor> interceptors = resolveClientInterceptors();
-
-            // Build the managed channel with TLS and interceptors (if any)
-            this.channel = Grpc
-                    .newChannelBuilderForAddress(host, port, channelCredentials)
-                    .intercept(interceptors)
-                    .build();
-
-            this.blockingStub = DCBGrpc.newBlockingStub(channel);
-
-            this.isConnected = true;
-        } catch (Exception e) {
-            throw new UmaDbException.IoException(
-                    "Failed to connect to UmaDB: " + e.getMessage()
-            );
-        }
-    }
-
-    /**
-     * Returns the list of gRPC client interceptors to apply.
-     * <p>
-     * Currently only used for API key authentication.
-     */
-    private List<ClientInterceptor> resolveClientInterceptors() {
-        var interceptors = new ArrayList<ClientInterceptor>();
-        if (optionalApiKey != null) {
-            interceptors.add(new ApiKeyInterceptor(optionalApiKey));
-        }
-        return interceptors;
-    }
-
-    /**
-     * Resolves the appropriate channel credentials (TLS or insecure).
-     */
-    private ChannelCredentials resolveChannelCredentials() throws IOException {
-        return isTlsEnabled() ?
-                getTlsChannelCredentials() :
-                getInsecureChannelCredentials();
-    }
-
-    private ChannelCredentials getTlsChannelCredentials() throws IOException {
-        if (optionalCaFilePath != null) {
-            return TlsChannelCredentials.newBuilder()
-                    .trustManager(optionalCaFilePath.toFile())
-                    .build();
-        } else {
-            return TlsChannelCredentials.create();
-        }
-    }
-
-    private ChannelCredentials getInsecureChannelCredentials() {
-        return InsecureChannelCredentials.create();
+        connection.connect();
+        this.blockingStub = DCBGrpc.newBlockingStub(connection.channel());
     }
 
     @Override
@@ -164,84 +101,56 @@ public final class UmaDbClientImpl implements UmaDbClient {
             var umadbAppendResponse = blockingStub.append(umadbAppendRequest);
             return new AppendResponse(umadbAppendResponse.getPosition());
         } catch (StatusRuntimeException e) {
-            throw resolveUmaDbException(e);
+            throw GrpcErrorTranslator.translate(e);
         }
-    }
-
-    private static UmaDbException resolveUmaDbException(StatusRuntimeException e) {
-        return extractErrorResponse(e)
-                .map(UmaDbClientImpl::toUmaDbException)
-                .orElseGet(() -> toUmaDbException(e));
-    }
-
-    private static UmaDbException toUmaDbException(Umadb.ErrorResponse errorResponse) {
-        var errorMessage = errorResponse.getMessage();
-        return switch (errorResponse.getErrorType()) {
-            case IO -> new UmaDbException.IoException(errorMessage);
-            case SERIALIZATION -> new UmaDbException.SerializationException(errorMessage);
-            case INTEGRITY -> new UmaDbException.IntegrityException(errorMessage);
-            case CORRUPTION -> new UmaDbException.CorruptionException(errorMessage);
-            case INTERNAL -> new UmaDbException.InternalException(errorMessage);
-            case AUTHENTICATION -> new UmaDbException.AuthenticationException(errorMessage);
-            case INVALID_ARGUMENT -> new UmaDbException.InvalidArgumentException(errorMessage);
-            case UNRECOGNIZED -> new UmaDbException(errorMessage);
-        };
-    }
-
-    private static UmaDbException toUmaDbException(StatusRuntimeException e) {
-        var errorMessage = e.getMessage();
-        return switch (e.getStatus().getCode()) {
-            case UNAUTHENTICATED -> new UmaDbException.AuthenticationException(errorMessage);
-            case FAILED_PRECONDITION -> new UmaDbException.IntegrityException(errorMessage);
-            case DATA_LOSS -> new UmaDbException.CorruptionException(errorMessage);
-            case INVALID_ARGUMENT -> new UmaDbException.InvalidArgumentException(errorMessage);
-            case INTERNAL -> new UmaDbException.InternalException(errorMessage);
-            default -> new UmaDbException("gRPC error: %s".formatted(errorMessage), e);
-        };
-    }
-
-    private static Optional<Umadb.ErrorResponse> extractErrorResponse(StatusRuntimeException e) {
-        return Optional.ofNullable(e.getTrailers())
-                .flatMap(UmaDbClientImpl::extractErrorResponseFromMetadata);
-    }
-
-    private static Optional<Umadb.ErrorResponse> extractErrorResponseFromMetadata(Metadata trailers) {
-        try {
-            if (trailers.containsKey(DETAILS)) {
-                return Optional.of(
-                        Umadb.ErrorResponse.parseFrom(trailers.get(DETAILS))
-                );
-            }
-        } catch (InvalidProtocolBufferException _) {
-            // Fall back to generic gRPC error handling
-        }
-        return Optional.empty();
-    }
-
-    private boolean isTlsEnabled() {
-        return this.tlsEnabled;
     }
 
     @Override
     public Iterator<ReadResponse> handle(ReadRequest readRequest) {
         var umadbReadRequest = UmaDbUtils.toUmadbReadRequest(readRequest);
-        try {
-            var grpcIterator = blockingStub.read(umadbReadRequest);
-            return new ReadResponseIterator(grpcIterator);
-        } catch (StatusRuntimeException e) {
-            throw resolveUmaDbException(e);
-        }
+        return openStream(
+                stub -> stub.read(umadbReadRequest),
+                UmaDbUtils::toReadResponse
+        );
     }
 
     @Override
     public Iterator<SubscribeResponse> subscribe(SubscribeRequest subscribeRequest) {
         var umadbSubscribeRequest = UmaDbUtils.toUmadbSubscribeRequest(subscribeRequest);
+        return openStream(
+                stub -> stub.subscribe(umadbSubscribeRequest),
+                UmaDbUtils::toSubscribeResponse
+        );
+    }
+
+    /**
+     * Opens a blocking server stream inside a cancellable context.
+     * <p>
+     * The context is registered so that {@link #shutdown()} can cancel a stream the caller
+     * has stopped consuming; without that, an abandoned subscription keeps the channel
+     * alive for the whole shutdown grace period.
+     */
+    private <G, T> Iterator<T> openStream(
+            Function<DCBGrpc.DCBBlockingStub, Iterator<G>> invoker,
+            Function<G, T> mapper
+    ) {
+        var callContext = Context.current().withCancellation();
+        liveStreamContexts.add(callContext);
+
+        Context previous = callContext.attach();
         try {
-            var grpcIterator = blockingStub.subscribe(umadbSubscribeRequest);
-            return new SubscribeResponseIterator(grpcIterator);
+            return new StreamingIterator<>(invoker.apply(blockingStub), mapper, callContext, liveStreamContexts);
         } catch (StatusRuntimeException e) {
-            throw resolveUmaDbException(e);
+            releaseContext(callContext);
+            throw GrpcErrorTranslator.translate(e);
+        } finally {
+            callContext.detach(previous);
         }
+    }
+
+    private void releaseContext(Context.CancellableContext callContext) {
+        liveStreamContexts.remove(callContext);
+        callContext.close();
     }
 
     @Override
@@ -253,7 +162,7 @@ public final class UmaDbClientImpl implements UmaDbClient {
             var response = blockingStub.getTrackingInfo(UmaDbUtils.toUmadbTrackingRequest(source));
             return response.hasPosition() ? Optional.of(response.getPosition()) : Optional.empty();
         } catch (StatusRuntimeException e) {
-            throw resolveUmaDbException(e);
+            throw GrpcErrorTranslator.translate(e);
         }
     }
 
@@ -262,66 +171,77 @@ public final class UmaDbClientImpl implements UmaDbClient {
         try {
             return blockingStub.head(Umadb.HeadRequest.getDefaultInstance()).getPosition();
         } catch (StatusRuntimeException e) {
-            throw resolveUmaDbException(e);
+            throw GrpcErrorTranslator.translate(e);
         }
     }
 
     @Override
     public void shutdown() {
-        if (isShutdown || !isConnected) {
-            return;
-        }
-        try {
-            channel.shutdown().awaitTermination(TIMEOUT_TERMINATION_SECONDS, SECONDS);
-            isShutdown = true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new UmaDbException(e.getMessage(), e);
-        }
+        connection.shutdown(this::cancelLiveStreams);
     }
 
-    private record ReadResponseIterator(Iterator<Umadb.ReadResponse> grpcIterator) implements Iterator<ReadResponse> {
+    /**
+     * Cancels every stream still open, so the channel has no in-flight calls holding it
+     * back. A subscription never ends on its own, so without this the graceful shutdown
+     * would block for its full timeout.
+     */
+    private void cancelLiveStreams() {
+        for (var callContext : Set.copyOf(liveStreamContexts)) {
+            callContext.cancel(new CancellationException("Client shut down"));
+        }
+        liveStreamContexts.clear();
+    }
+
+    /**
+     * Adapts a blocking gRPC response iterator onto the domain type, translating failures
+     * and releasing the call's context once the stream is done with.
+     */
+    private static final class StreamingIterator<G, T> implements Iterator<T> {
+
+        private final Iterator<G> grpcIterator;
+        private final Function<G, T> mapper;
+        private final Context.CancellableContext callContext;
+        private final Set<Context.CancellableContext> registry;
+
+        private StreamingIterator(
+                Iterator<G> grpcIterator,
+                Function<G, T> mapper,
+                Context.CancellableContext callContext,
+                Set<Context.CancellableContext> registry
+        ) {
+            this.grpcIterator = grpcIterator;
+            this.mapper = mapper;
+            this.callContext = callContext;
+            this.registry = registry;
+        }
 
         @Override
         public boolean hasNext() {
             try {
-                return grpcIterator.hasNext();
+                boolean hasNext = grpcIterator.hasNext();
+                if (!hasNext) {
+                    release();
+                }
+                return hasNext;
             } catch (StatusRuntimeException e) {
-                throw resolveUmaDbException(e);
+                release();
+                throw GrpcErrorTranslator.translate(e);
             }
         }
 
         @Override
-        public ReadResponse next() {
+        public T next() {
             try {
-                Umadb.ReadResponse grpcResponse = grpcIterator.next();
-                return UmaDbUtils.toReadResponse(grpcResponse);
+                return mapper.apply(grpcIterator.next());
             } catch (StatusRuntimeException e) {
-                throw resolveUmaDbException(e);
-            }
-        }
-    }
-
-    private record SubscribeResponseIterator(Iterator<Umadb.SubscribeResponse> grpcIterator)
-            implements Iterator<SubscribeResponse> {
-
-        @Override
-        public boolean hasNext() {
-            try {
-                return grpcIterator.hasNext();
-            } catch (StatusRuntimeException e) {
-                throw resolveUmaDbException(e);
+                release();
+                throw GrpcErrorTranslator.translate(e);
             }
         }
 
-        @Override
-        public SubscribeResponse next() {
-            try {
-                Umadb.SubscribeResponse grpcResponse = grpcIterator.next();
-                return UmaDbUtils.toSubscribeResponse(grpcResponse);
-            } catch (StatusRuntimeException e) {
-                throw resolveUmaDbException(e);
-            }
+        private void release() {
+            registry.remove(callContext);
+            callContext.close();
         }
     }
 }

@@ -1,6 +1,9 @@
 package io.umadb.client;
 
+import io.umadb.client.grpc.UmaDbAsyncClientImpl;
 import io.umadb.client.grpc.UmaDbClientImpl;
+
+import java.util.concurrent.Executor;
 
 /**
  * Builder for creating {@link UmaDbClient} instances.
@@ -39,6 +42,7 @@ public final class UmaDbClientBuilder {
     private boolean tlsEnabled;
     private String caFilePath;
     private String apiKey;
+    private Executor executor;
 
     /**
      * Sets both the host and port for the UmaDB server.
@@ -122,19 +126,48 @@ public final class UmaDbClientBuilder {
     }
 
     /**
+     * Sets the executor on which gRPC invokes callbacks.
+     * <p>
+     * This governs the threads that complete the futures and invoke the
+     * {@link UmaDbStreamObserver} callbacks of a {@link UmaDbAsyncClient}, and it is
+     * therefore mainly of interest for the asynchronous client. gRPC keeps the callbacks
+     * of any single call serialized regardless of the executor used, so event ordering is
+     * preserved.
+     * <p>
+     * On a recent JDK, {@code Executors.newVirtualThreadPerTaskExecutor()} is a good
+     * choice. If left unset, gRPC's own default executor is used.
+     *
+     * @param executor the executor to dispatch callbacks on
+     * @return this builder instance
+     */
+    public UmaDbClientBuilder withExecutor(Executor executor) {
+        this.executor = executor;
+        return this;
+    }
+
+    /**
      * Builds a new {@link UmaDbClient} using the configured settings.
      *
      * @return a fully configured {@link UmaDbClient}
-     * @throws IllegalStateException if required configuration is missing
-     *                               or if an API key is configured without TLS
+     * @throws IllegalArgumentException if required configuration is missing
+     *                                  or if an API key is configured without TLS
      */
     public UmaDbClient build() {
-        return new UmaDbClientImpl(
-                host,
-                port,
-                tlsEnabled,
-                caFilePath,
-                apiKey
-        );
+        return new UmaDbClientImpl(host, port, tlsEnabled, caFilePath, apiKey, executor);
+    }
+
+    /**
+     * Builds a new {@link UmaDbAsyncClient} using the configured settings.
+     * <p>
+     * The asynchronous client is independent of any client returned by {@link #build()}:
+     * it opens and owns its own connection, and shutting one down does not affect the
+     * other.
+     *
+     * @return a fully configured {@link UmaDbAsyncClient}
+     * @throws IllegalArgumentException if required configuration is missing
+     *                                  or if an API key is configured without TLS
+     */
+    public UmaDbAsyncClient buildAsync() {
+        return new UmaDbAsyncClientImpl(host, port, tlsEnabled, caFilePath, apiKey, executor);
     }
 }
