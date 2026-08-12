@@ -12,7 +12,7 @@ repositories {
 }
 
 def grpcVersion = '1.82.1'
-def protocVersion = '3.25.8'
+def protocVersion = '4.35.1'
 def junitVersion = '6.1.1'
 def testcontainersVersion = '2.0.5'
 
@@ -20,6 +20,7 @@ dependencies {
     implementation "io.grpc:grpc-netty-shaded:${grpcVersion}"
     implementation "io.grpc:grpc-protobuf:${grpcVersion}"
     implementation "io.grpc:grpc-stub:${grpcVersion}"
+    implementation "com.google.protobuf:protobuf-java:${protocVersion}"
 
     testImplementation platform("org.junit:junit-bom:${junitVersion}")
     testImplementation 'org.junit.jupiter:junit-jupiter'
