@@ -11,7 +11,7 @@ repositories {
     mavenCentral()
 }
 
-def grpcVersion = '1.83.0'
+def grpcVersion = '1.83.1'
 def protocVersion = '4.35.1'
 def junitVersion = '6.1.3'
 def testcontainersVersion = '2.0.5'
